@@ -1,6 +1,7 @@
-#Wplyw pojemnosci magazynu energii elektrycznej w hybrydowych systemach PV na koszt zakupu energii brakujacej.
 
-#------------------------------------------------------------------#
+# Wplyw pojemnosci magazynu energii elektrycznej w hybrydowych systemach PV na koszt zakupu energii brakujacej
+
+# 1. Pobranie i Przetwarzanie Danych o Produkcji Energii przez Panele PV
 
 # W tym skrypcie zamierzamy pobrac godzinowa moc generowana przez panele fotowoltaiczne (PV)
 # ze strony: https://re.jrc.ec.europa.eu/pvg_tools/en/
@@ -13,6 +14,9 @@ getwd()
 
 # Wczytywanie danych
 godz_moc_PV <- head(read.csv("Timeseries.csv", header = TRUE, sep = ",", skip = 10), -7)
+
+# Usuniecie niepotrzebnych wierszy (chcemy miec od 2018)
+godz_moc_PV <- godz_moc_PV[-(1:113952), ]
 
 # Usuwanie niepotrzebnych kolumn
 godz_moc_PV <- godz_moc_PV[,-3:-7]
@@ -46,18 +50,241 @@ podsumowanie_roczne <- godz_moc_PV %>%
   group_by(Rok) %>%
   summarize(CalkowitaMoc = sum(Moc, na.rm = TRUE))
 
+dane_najgorszego_roku <- filter(podsumowanie_roczne, CalkowitaMoc == rok_najgorszy)
+dane_najlepszego_roku <- filter(podsumowanie_roczne, CalkowitaMoc == rok_najlepszy)
+
 rok_sredni <- mean(podsumowanie_roczne$CalkowitaMoc)
 rok_najgorszy <- min(podsumowanie_roczne$CalkowitaMoc)
 rok_najlepszy <- max(podsumowanie_roczne$CalkowitaMoc)
-
-dane_najgorszego_roku <- filter(podsumowanie_roczne, CalkowitaMoc == rok_najgorszy)
-dane_najlepszego_roku <- filter(podsumowanie_roczne, CalkowitaMoc == rok_najlepszy)
 
 cat("Rok średni:", rok_sredni, "kW mocy\n")
 cat("Najgorszy rok to", dane_najgorszego_roku$Rok, "z", rok_najgorszy, "kW mocy\n")
 cat("Najlepszy rok to", dane_najlepszego_roku$Rok, "z", rok_najlepszy, "kW mocy\n")
 
-str(godz_moc_PV)
+# WIZUALIZACJE
+
+library(ggplot2)
+
+# Wykres liniowy produkcji energii na przestrzeni czasu:
+# Pokazuje, jak produkcja energii zmieniała się z czasem.
+
+ggplot(godz_moc_PV, aes(x = Data, y = Moc)) +
+  geom_line(aes(color = as.factor(Godzina)), linewidth = 1) +
+  facet_wrap(~ Godzina, ncol = 4) +
+  labs(title = "Produkcja energii przez panele PV na przestrzeni czasu",
+       x = "Data", y = "Moc (kW)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.background = element_rect(fill = "#f7f7f7"),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333", hjust = 0.5),
+    axis.text = element_text(color = "#333333"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "#e1e1e1", linewidth = 0.5),
+    legend.position = "none"
+  ) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_y_continuous(labels = scales::comma)
+
+
+ggplot(godz_moc_PV, aes(x = Data, y = Moc, fill = as.factor(Godzina))) +
+  geom_area(aes(group = Godzina), alpha = 0.6, position = 'identity') +
+  labs(title = "Produkcja energii przez panele PV na przestrzeni czasu",
+       x = "Data", y = "Moc (kW)", fill = "Godzina") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.background = element_rect(fill = "#f7f7f7"),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333", hjust = 0.5),
+    axis.text = element_text(color = "#333333"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "#e1e1e1", linewidth = 0.5)
+  ) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_y_continuous(labels = scales::comma)
+
+
+# Dzienne wartości produkcji energii w najgorszym/najlepszym roku 
+
+godz_moc_dla_najgorszego_roku <- filter(godz_moc_PV, Rok == dane_najgorszego_roku$Rok)
+godz_moc_dla_najlepszego_roku <- filter(godz_moc_PV, Rok == dane_najlepszego_roku$Rok)
+
+# Połączenie danych dla obu lat
+oba_lata <- rbind(
+  mutate(godz_moc_dla_najgorszego_roku, Typ = "Najgorszy rok"),
+  mutate(godz_moc_dla_najlepszego_roku, Typ = "Najlepszy rok")
+)
+
+ggplot(oba_lata, aes(x = Data, y = Moc, color = Typ)) +
+  geom_line(size = 1.2) +
+  labs(title = paste("Porównanie produkcji energii: Najlepszy vs. Najgorszy rok"),
+       x = "Data", y = "Moc [kW]") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.background = element_rect(fill = "#f7f7f7"),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333", hjust = 0.5),
+    axis.title = element_text(color = "#333333", size = 14, face = "bold"),
+    axis.text = element_text(color = "#333333"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "#e1e1e1", linewidth = 0.5),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12, color = "#333333"),
+    legend.background = element_rect(fill = "#f7f7f7", color = NA),
+    legend.key = element_rect(fill = "#f7f7f7", color = NA)
+  ) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %Y") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_color_manual(values = c("Najgorszy rok" = "#E63946", "Najlepszy rok" = "#2A9D8F"))
+
+#lub 
+
+# Konwertujemy datę na format "miesiąc-dzień", żeby dane obu lat były nakładane na siebie.
+oba_lata$MiesiacDzien <- format(oba_lata$Data, "%m-%d")
+
+# Filtrujemy dane dla najgorszego i najlepszego roku
+najgorszy_rok_data <- oba_lata %>% filter(Typ == "Najgorszy rok")
+najlepszy_rok_data <- oba_lata %>% filter(Typ == "Najlepszy rok")
+
+library(highcharter)
+
+highchart() %>% 
+  hc_title(text = "Porównanie produkcji energii: Najlepszy vs. Najgorszy rok") %>%
+  hc_xAxis(categories = najgorszy_rok_data$MiesiacDzien, tickInterval = 30) %>%
+  hc_yAxis(title = list(text = "Moc [kW]")) %>%
+  hc_add_series(name = "Najgorszy rok", data = najgorszy_rok_data$Moc, type = "area", color = "#E63946", fillColor = "rgba(230, 57, 70, 0.3)") %>%
+  hc_add_series(name = "Najlepszy rok", data = najlepszy_rok_data$Moc, type = "area", color = "#2A9D8F", fillColor = "rgba(42, 157, 143, 0.3)") %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE, valueDecimals = 2) %>%
+  hc_legend(title = list(text = NULL), 
+            layout = "vertical", 
+            align = "right", 
+            verticalAlign = "top", 
+            floating = TRUE,
+            borderWidth = 1,
+            itemStyle = list(color = "#000000"),
+            itemHoverStyle = list(color = "#333333"),
+            symbolRadius = 0)
+
+# Średnia godzinowa produkcja energii w ciągu dnia dla całego zbioru danych:
+srednia_godzinowa <- godz_moc_PV %>%
+  group_by(Godzina) %>%
+  summarize(SredniaMoc = mean(Moc, na.rm = TRUE))
+
+srednia_godzinowa$Godzina <- as.numeric(srednia_godzinowa$Godzina)
+
+#install.packages("ggthemes")
+library(ggthemes)
+
+ggplot(srednia_godzinowa, aes(x = Godzina, y = SredniaMoc)) +
+  # Linia z wypełnieniem
+  geom_line(color = "#2A9D8F", size = 1.2) +
+  geom_point(aes(y = SredniaMoc), color = "#E63946", size = 3, shape = 21, fill = "#E63946") +
+  geom_area(aes(y = SredniaMoc), fill = "#2A9D8F", alpha = 0.3) +
+  
+  # Etykiety i tytuły
+  labs(
+    title = "Średnia godzinowa produkcja energii w ciągu dnia", 
+    x = "Godzina", 
+    y = "Średnia moc [kW]",
+    subtitle = "Analiza bazująca na całym zbiorze danych",
+  ) +
+  
+  # Stylizacja osi
+  scale_x_continuous(breaks = seq(0, 24, 1), limits = c(0, 24)) +
+  theme_minimal(base_size = 14) + 
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption = element_text(color = "grey60"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+
+# Histogram rozkładu mocy:
+# Pokazuje, jakie wartości mocy są najczęstsze.
+filtered_data <- filter(godz_moc_PV, Moc > 0)
+
+
+ggplot(filtered_data, aes(x = Moc)) +
+  # Histogram pokazuje, jak często pojawiają się różne wartości mocy.
+  geom_histogram(fill = "#2A9D8F", color = "#264653", binwidth = 0.1, alpha = 0.7) +
+  
+  # Gładzenie - Krzywa gęstości (dodana za pomocą geom_density) pokazuje, gdzie w tych danych jest największa koncentracja wartości mocy.
+  geom_density(aes(y = ..scaled.. * max(..count..)), color = "#E63946", size = 1.2) +
+  
+  # Etykiety i tytuły
+  labs(
+    title = "Rozkład produkcji energii przez panele PV (bez wartości 0)",
+    x = "Moc (kW)",
+    y = "Częstotliwość",
+    subtitle = "Analiza bazująca na przefiltrowanych danych",
+    caption = "Źródło: Twoje źródło danych"
+  ) +
+  
+  # Stylizacja wykresu
+  theme_minimal(base_size = 14) + 
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption = element_text(color = "grey60"),
+    axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+
+# Boxplot produkcji energii w różnych godzinach:
+# Pokazuje, jak zmienia się produkcja energii w ciągu dnia (z wykluczeniem wartosci 0).
+ggplot(godz_moc_PV, aes(x = Godzina, y = Moc)) +
+  geom_boxplot(fill = "royalblue", color = "#2c3e50") +
+  labs(title = "Rozkład produkcji energii w ciągu dnia",
+       x = "Godzina", y = "Moc (kW)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.background = element_rect(fill = "#f7f7f7"),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    plot.title = element_text(face = "bold", size = 16, color = "#333333", hjust = 0.5),
+    axis.text = element_text(color = "#333333"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "#e1e1e1", linewidth = 0.5),
+    legend.position = "none"
+  )
+
+# Interaktywny wykres przy użyciu highcharter przedstawiający roczną produkcję energii:
+# Pokazuje, jak roczna produkcja energii zmieniała się na przestrzeni lat.
+
+library(highcharter)
+
+hchart(podsumowanie_roczne, "column", hcaes(x = Rok, y = CalkowitaMoc)) %>%
+  hc_title(text = "Roczna produkcja energii przez panele PV", margin = 20, style = list(fontSize = "18px")) %>%
+  hc_xAxis(title = list(text = "Rok"), lineColor = '#999999', lineWidth = 1, tickLength = 5, gridLineWidth = 0.5) %>%
+  hc_yAxis(title = list(text = "Całkowita Moc (kW)"), lineColor = '#999999', lineWidth = 1, gridLineWidth = 0.5) %>%
+  hc_colors(c("#5B8FF9", "#5AD8A6", "#5D7092", "#F6BD16", "#E8684A", "#6DC8EC", "#9270CA", "#FF9D4D", "#269A99", "#FF99C3")) %>%
+  hc_chart(backgroundColor = "#FAFAFA", borderColor = "#E1E1E1", borderWidth = 1, borderRadius = 3, plotBackgroundColor = "#FFFFFF") %>%
+  hc_plotOptions(
+    column = list(
+      dataLabels = list(enabled = TRUE, color = '#333333'),
+      borderWidth = 0,
+      borderColor = "#666666",
+      colorByPoint = TRUE,
+      states = list(
+        hover = list(
+          brightness = -0.1, # Nieco przyciemnienie słupka
+          shadow = list(
+            color = 'gray',
+            offsetX = 0,
+            offsetY = 0,
+            opacity = 0.6,
+            width = 8
+          )
+        )
+      )
+    )
+  ) %>%
+  hc_credits(enabled = TRUE, text = "Źródło: Twoje Źródło", href = "", position = list(align = "right", verticalAlign = "bottom"), style = list(fontSize = "10px"))
+
 
 #------------------------------------------------------------------#
 
@@ -136,6 +363,144 @@ str(godzinowa_cena_energii)
 godzinowa_cena_energii$Godzina[1993:1994]
 godzinowa_cena_energii$Czas[1993:1994]
 
+# WIZUALIZACJE
+
+# Wykres Ceny w Czasie: Wyświetla zmienność ceny energii elektrycznej na przestrzeni czasu.
+# Wykres porównawczy z gładką krzywą (loess):
+# Pokazuje trend cen energii wraz z gładką krzywą, która uwypukla ogólny trend.
+ggplot(godzinowa_cena_energii, aes(x = Data, y = RCE)) +
+  # Rzeczywiste dane
+  geom_line(aes(color = "Rzeczywiste dane"), size = 1) +
+  
+  # Krzywa trendu Loess
+  geom_smooth(method = "loess", aes(color = "Trend (loess)"), se = FALSE, size = 1.5) +
+  
+  # Tytuły i etykiety osi
+  labs(
+    title = "Trend cen energii z krzywą loess",
+    subtitle = "Krzywa loess wskazuje ogólny trend cenowy w czasie",
+    x = "Data",
+    y = "Cena [PLN/kWh]",
+    color = "Legenda"
+  ) +
+  
+  # Manualne kolory dla linii
+  scale_color_manual(values = c("Rzeczywiste dane" = "blue", "Trend (loess)" = "red")) +
+  
+  # Czysty temat wykresu
+  theme_minimal() +
+  
+  # Dodatkowe modyfikacje tematu
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+
+# Histogram Ceny Energii: Pozwala ocenić, jakie ceny są najbardziej powszechne.
+
+# Obliczenie średniej wartości
+srednia_cena <- mean(godzinowa_cena_energii$RCE, na.rm = TRUE)
+
+ggplot(godzinowa_cena_energii, aes(x = RCE)) +
+  # Histogram
+  geom_histogram(fill = "green", color = "black", binwidth = 0.001) +
+  
+  # Linia średniej wartości
+  geom_vline(aes(xintercept = srednia_cena), linetype = "dashed", size = 1, color = "red") +
+  
+  # Etykieta średniej wartości
+  annotate("text", x = srednia_cena, y = Inf, label = paste("Średnia:", round(srednia_cena, 4)),
+           vjust = 2, hjust = 0.5, color = "red", size = 4) +
+  
+  # Tytuły i etykiety osi
+  labs(
+    title = "Rozkład ceny energii elektrycznej",
+    x = "Cena [PLN/kWh]",
+    y = "Częstotliwość"
+  ) +
+  
+  # Czysty temat wykresu
+  theme_minimal() +
+  
+  # Dodatkowe modyfikacje tematu
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14)
+  )
+
+
+# Wykres średniej ceny energii w ciągu miesiąca:
+# Pozwala to zrozumieć, czy są jakieś sezony, w których ceny są wyższe lub niższe.
+godzinowa_cena_energii$Rok <- year(godzinowa_cena_energii$Data)
+
+srednia_miesieczna <- godzinowa_cena_energii %>%
+  group_by(Rok, Miesiac) %>%
+  summarize(SredniaCena = mean(RCE, na.rm = TRUE))
+
+ggplot(srednia_miesieczna, aes(x = Miesiac, y = SredniaCena, color = as.factor(Rok))) +
+  geom_line() +
+  scale_color_discrete(name = "Rok") +
+  labs(title = "Średnia cena energii w ciągu miesiąca według roku",
+       x = "Miesiąc", y = "Średnia cena (PLN/kWh)") +
+  theme_minimal()
+
+library(lubridate)
+
+# Zamieniamy numeryczne wartości miesiąca na nazwy w języku polskim
+nazwy_miesiecy <- c("styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień")
+godzinowa_cena_energii$NazwaMiesiaca <- nazwy_miesiecy[month(godzinowa_cena_energii$Data)]
+
+# Grupowanie i agregacja
+srednia_miesieczna <- godzinowa_cena_energii %>%
+  group_by(Rok, NazwaMiesiaca) %>%
+  summarize(SredniaCena = mean(RCE, na.rm = TRUE))
+
+# Tworzenie wykresu
+ggplot(srednia_miesieczna, aes(x = NazwaMiesiaca, y = SredniaCena, color = as.factor(Rok), group = as.factor(Rok))) +
+  geom_line() +
+  scale_color_discrete(name = "Rok") +
+  labs(title = "Średnia cena energii w ciągu miesiąca według roku",
+       x = "Miesiąc", y = "Średnia cena (PLN/kWh)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_discrete(limits = nazwy_miesiecy)  # Upewniamy się, że kolejność miesięcy jest zachowana
+
+
+# Tworzenie obiektu ts:
+ceny_ts <- ts(godzinowa_cena_energii$RCE, frequency = 24)
+
+# Dekompozycja szeregu czasowego:
+ceny_decomposed <- decompose(ceny_ts)
+
+# Wizualizacja wyników:
+plot(ceny_decomposed)
+
+# Wykres liniowy dla każdego roku z osobna:
+# Pokazuje, jak kształtują się ceny w ciągu roku.
+godzinowa_cena_energii$Rok <- year(godzinowa_cena_energii$Data)
+
+library(scales)  # Dla funkcji date_format()
+
+ggplot(godzinowa_cena_energii, aes(x = Data, y = RCE)) +
+  geom_line(aes(color = factor(Rok)), size = 1) +  # Grubsza linia
+  scale_x_date(labels = date_format("%b %Y")) +  # Formatowanie etykiet na osi x
+  scale_color_brewer(palette = "Set1") +  # Zestaw kolorów
+  labs(title = "Ceny energii w ciągu roku", 
+       x = "Data", 
+       y = "Cena [PLN/kWh]", 
+       color = "Rok") +  # Opis legnedy
+  facet_wrap(~ Rok, scales = "free_x") +
+  theme_light() +  # Styl wykresu
+  theme(legend.position = "bottom")  # Pozycja legnedy
+
+
 #------------------------------------------------------------------#
 
 # Obliczanie sredniego dziennego zużycia energii dla 4-osobowej rodziny
@@ -209,42 +574,310 @@ head(roczne_zuzycie)
 godzinowe_dane_zuzycia$Godzina <- as.character(godzinowe_dane_zuzycia$Godzina)
 str(godzinowe_dane_zuzycia)
 
+# WIZUALIZACJE
+
+# Miesięczne Zestawienie Zużycia:
+# Wykres słupkowy przedstawiający średnie miesięczne zużycie energii dla każdego roku. 
+# Umożliwi zrozumienie, w których miesiącach zużycie jest największe.
+
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+
+# Ustawienie kolorów
+kolory <- brewer.pal(5, "Set3")
+
+# Tworzenie wektora z polskimi nazwami miesięcy
+polskie_miesiace <- c("Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru")
+
+# Zamiana numerów miesięcy na ich polskie nazwy
+miesieczne_dane$Miesiac <- factor(polskie_miesiace[miesieczne_dane$Miesiac], levels = polskie_miesiace)
+
+# Wykres
+ggplot(miesieczne_dane, aes(x = Miesiac, y = MiesieczneZuzycie, fill = as.factor(Rok))) +
+  geom_bar(stat = "identity", position = "dodge", show.legend = TRUE, width = 0.7) +
+  geom_text(aes(label=sprintf("%.0f", round(MiesieczneZuzycie, digits = 0))), vjust=1.6, color="black", position = position_dodge(0.9), size=3.5) +
+  scale_fill_manual(values = kolory) +
+  labs(title = "Średnie Miesięczne Zużycie Energii Elektrycznej w Poszczególnych Latach", x = "Miesiąc", y = "Miesięczne Zużycie [kWh]") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_blank(),
+        legend.position = "right")
+
+# Średnie dzienne godzinowe zużycie energii
+# Słupki wykresu ilustrują, w jakich godzinach zużycie energii jest największe i najmniejsze.
+# !Obecnie wykres jest niezbyt uzyteczny gdyz nie mamy rzeczywistych danych.
+
+# Obliczanie średniego godzinowego zużycia energii
+srednie_godzinowe_zuzycie <- godzinowe_dane_zuzycia %>%
+  group_by(Godzina) %>%
+  summarise(SrednieZuzycie = mean(Zuzycie, na.rm = TRUE))
+
+# Tworzenie wykresu
+ggplot(srednie_godzinowe_zuzycie, aes(x = Godzina, y = SrednieZuzycie, fill = SrednieZuzycie)) +
+  geom_col(show.legend = FALSE, color = "black", width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f", SrednieZuzycie)), vjust = -0.5, size = 3) +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  labs(title = "Średnie Dzienne Godzinowe Zużycie Energii",
+       subtitle = "Zużycie energii w ciągu dnia",
+       x = "Godzina Dnia",
+       y = "Średnie Zużycie Energii [kWh]") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 #------------------------------------------------------------------#
 
-# analiza
-# 1. bez paneli PV
+# 1. Analiza sytuacji bez paneli PV: Obliczenie kosztu zakupu energii przy braku paneli.
 
 # Wczytane dane
 godzinowe_dane_zuzycia
 godzinowa_cena_energii 
 
 # Połącz dane
-dane <- merge(godzinowe_dane_zuzycia, godzinowa_cena_energii, by=c("Data","Godzina"))
+dane_zuzycia_i_kosztu <- merge(godzinowe_dane_zuzycia, godzinowa_cena_energii, by=c("Data","Godzina"))
 
 # Usuwanie niepotrzebnej kolumny
-dane <- dane[,-6]
+dane_zuzycia_i_kosztu <- dane_zuzycia_i_kosztu[,-6]
 
 # Obliczanie kosztu energii dla kazdej godziny
-dane$Koszt <- dane$Zuzycie * dane$RCE
+dane_zuzycia_i_kosztu$Koszt <- dane_zuzycia_i_kosztu$Zuzycie * dane_zuzycia_i_kosztu$RCE
+
+# Dodajemy kolumnę Rok do dalszej analizy
+dane_zuzycia_i_kosztu$Rok <- format(as.Date(dane_zuzycia_i_kosztu$Data), "%Y")
 
 # Wyswietlanie danych
-head(dane)
+head(dane_zuzycia_i_kosztu)
 
 # Podsumowanie
-sumaryczny_koszt <- sum(dane$Koszt, na.rm=TRUE)  # Oblicz całkowity koszt energii dla całego roku
+sumaryczny_koszt <- sum(dane_zuzycia_i_kosztu$Koszt, na.rm=TRUE)  # Oblicz całkowity koszt energii dla całego roku
 
 # Obliczamy dzienny koszt dla każdej daty
-dzienny_koszt <- dane %>%
+koszt_dzienny <- dane_zuzycia_i_kosztu %>%
   group_by(Data) %>%
-  summarise(DziennyKoszt = sum(Koszt, na.rm = TRUE))
+  summarise(KosztDzienny = sum(Koszt, na.rm = TRUE))
 
 # Obliczamy średni dzienny koszt
-sredni_dzienny_koszt <- mean(dzienny_koszt$DziennyKoszt, na.rm = TRUE)
+sredni_koszt_dzienny <- mean(koszt_dzienny$KosztDzienny, na.rm = TRUE)
 
-# 2. z panelami PV
+# Analiza sezonowości - koszty miesięczne przez lata
+dane_zuzycia_i_kosztu <- dane_zuzycia_i_kosztu %>%
+  mutate(Rok = year(Data), Miesiac = month(Data))
+
+koszt_miesieczny <- dane_zuzycia_i_kosztu %>%
+  group_by(Rok, Miesiac) %>%
+  summarise(KosztMiesieczny = sum(Koszt, na.rm=TRUE))
+
+library(ggplot2)
+library(highcharter)
+
+# Wykres kosztów miesięcznych przez lata
+ggplot(koszt_miesieczny, aes(x = Miesiac, y = KosztMiesieczny, group = Rok, color = as.factor(Rok))) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Miesięczne koszty energii przez lata",
+       x = "Miesiąc", y = "Koszt miesięczny",
+       color = "Rok")
+
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(lubridate)
+
+# Polskie nazwy miesięcy
+polskie_miesiace <- c("Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru")
+
+# Grupowanie i obliczanie kosztów miesięcznych
+koszt_miesieczny <- dane_zuzycia_i_kosztu %>%
+  group_by(Rok, Miesiac) %>%
+  summarise(KosztMiesieczny = sum(Koszt, na.rm=TRUE))
+
+# Zamiana numeru miesiąca na polską nazwę
+koszt_miesieczny$Miesiac <- polskie_miesiace[koszt_miesieczny$Miesiac]
+
+# Ustalenie kolejności miesięcy w ramce danych
+koszt_miesieczny <- koszt_miesieczny %>%
+  mutate(Miesiac = factor(Miesiac, levels = polskie_miesiace))
+
+# Ustalenie palety kolorów
+kolory <- brewer.pal(9, "Set1")
+
+# Wykres
+ggplot(koszt_miesieczny, aes(x = Miesiac, y = KosztMiesieczny, color = as.factor(Rok), group = Rok)) +
+  geom_line(size = 1) +
+  geom_point(size = 3, shape = 21, fill = "white") +
+  scale_color_manual(values = kolory) +
+  labs(title = "Miesięczne Koszty Energii przez Lata",
+       subtitle = "Analiza sezonowości kosztów energii",
+       x = "Miesiąc",
+       y = "Koszt Miesięczny [PLN]",
+       color = "Rok") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", 
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Obliczamy roczne koszty
+koszt_roczny <- dane_zuzycia_i_kosztu %>%
+  group_by(Rok) %>%
+  summarise(RocznyKoszt = sum(Koszt, na.rm = TRUE))
+
+# Dodajemy skumulowany koszt do danych o rocznych kosztach
+koszt_roczny <- koszt_roczny %>%
+  arrange(Rok) %>%
+  mutate(SkumulowanyKoszt = cumsum(RocznyKoszt))
+
+# Ustawienie kolorów
+kolory <- brewer.pal(9, "Set1")
+
+# Wykres skumulowanych rocznych kosztów energii
+hchart(koszt_roczny, "line", hcaes(x = Rok, y = SkumulowanyKoszt)) %>%
+  hc_title(text = "Skumulowane Roczne Koszty Energii") %>%
+  hc_subtitle(text = "Analiza kosztów energii na przestrzeni lat") %>%
+  hc_xAxis(title = list(text = "Rok"), categories = koszt_roczny$Rok, crosshair = TRUE) %>%
+  hc_yAxis(title = list(text = "Skumulowany Koszt [PLN]"), opposite = FALSE, crosshair = TRUE) %>%
+  hc_add_series(koszt_roczny, "point", hcaes(x = Rok, y = SkumulowanyKoszt), name = "Roczny Koszt",
+                dataLabels = list(enabled = TRUE, format = '{point.y:,.0f} zł', style = list(fontSize = '10px'))) %>%
+  hc_tooltip(headerFormat = "<b>Rok {point.x}</b><br/>",
+             pointFormat = "Skumulowany Koszt: <b>{point.y:.2f} zł</b>") %>%
+  hc_colors(kolory) %>%
+  hc_chart(zoomType = 'xy') %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_legend(enabled = TRUE)
+
+# 2. Analiza sytuacji z panelami PV bez magazynu: 
+# W tym scenariuszu nadmiar energii generowany przez panele jest marnowany.
+
+# Wprowadź kolumnę `Nadmiar` do tabeli, która przedstawia nadmiar energii generowanej przez panele PV
+dane_zuzycia_i_kosztu <- dane_zuzycia_i_kosztu %>%
+  mutate(Nadmiar = ProdukcjaPV - Zuzycie)
+
+# Ujemne wartości w `Nadmiar` oznaczają, że energii z paneli PV jest niewystarczająco, 
+# więc potrzebujemy zakupić dodatkową energię z sieci
+dane_zuzycia_i_kosztu$ZakupEnergii <- ifelse(Nadmiar < 0, abs(Nadmiar), 0)
+
+# Obliczanie kosztu zakupionej energii
+dane_zuzycia_i_kosztu$KosztZakupu <- dane_zuzycia_i_kosztu$ZakupEnergii * dane_zuzycia_i_kosztu$RCE
+
+# Sumowanie kosztów zakupu energii
+sumaryczny_koszt_zakupu <- sum(dane_zuzycia_i_kosztu$KosztZakupu, na.rm=TRUE)
+
+
 # 3. kupujac energie
 # 4. z magazynem
+#nadmiar energii przenosic do magazynu, 
+
 # 5. sprzedajac
 
 
+#___________
+#https://www.pse.pl/home
+
+# Funkcja określająca porę roku na podstawie daty
+pora_roku <- function(data) {
+  # Pobieranie miesiąca z daty
+  miesiac <- month(data)
+  
+  # Określenie pory roku na podstawie miesiąca
+  if(miesiac %in% c(12, 1, 2)) return("zima")
+  if(miesiac %in% 3:5) return("wiosna")
+  if(miesiac %in% 6:8) return("lato")
+  if(miesiac %in% 9:11) return("jesien")
+}
+
+# Współczynniki dla różnych por roku, które odzwierciedlają względne zużycie energii
+# Zimą zużycie jest wyższe, latem niższe itp.
+wspolczynniki_por_roku <- c(zima = 1.2, wiosna = 1.0, lato = 0.8, jesien = 1.1)
+
+# Funkcja generująca godzinowy rozkład zużycia energii w zależności od pory roku
+godzinowy_rozklad_zuzycia <- function(pora) {
+  # Określanie rozkładu godzinowego w zależności od pory roku
+  # Dla przykładu w jesieni między godziną 18 a 20 jest największe zużycie
+  if(pora == "zima") return(c(rep(1.1, 7), rep(1.3, 9), rep(1.5, 3), rep(1.2, 5)))
+  if(pora == "wiosna") return(c(rep(1, 7), rep(1.2, 10), rep(1.4, 3), rep(1.1, 4)))
+  if(pora == "lato") return(c(rep(0.9, 8), rep(1, 9), rep(1.3, 3), rep(1, 4)))
+  if(pora == "jesien") return(c(rep(1, 7), rep(1.2, 8), rep(1.6, 3), rep(1.3, 6)))
+}
+
+# Funkcja generująca godzinowe zużycie energii dla danej daty
+generuj_godzinowe_zuzycie <- function(data, dzienne_zuzycie) {
+  # Określenie pory roku dla danej daty
+  pora <- pora_roku(data)
+  
+  # Pobieranie godzinowego rozkładu dla danej pory roku
+  godzinowy_rozklad <- godzinowy_rozklad_zuzycia(pora)
+  
+  # Pobieranie współczynnika dla danej pory roku
+  wspolczynnik_pory_roku <- wspolczynniki_por_roku[pora]
+  
+  # Obliczanie godzinowego zużycia energii uwzględniając porę roku i godzinowy rozkład
+  godzinowe_zuzycie <- dzienne_zuzycie * wspolczynnik_pory_roku * godzinowy_rozklad / sum(godzinowy_rozklad)
+  return(godzinowe_zuzycie)
+}
+
+# Obliczanie sredniego dziennego zużycia energii dla 4-osobowej rodziny
+
+roczne_zuzycie <- 2300
+dni_w_roku <- 365
+srednie_dzienne_zuzycie <- roczne_zuzycie / dni_w_roku
+
+# Tworzymy sekwencje dat na podstawie roku
+data_poczatkowa <- as.Date("2018-01-01")
+data_koncowa <- as.Date("2022-12-31")
+daty <- seq(data_poczatkowa, data_koncowa, by = "days")
+
+# Tworzymy pusta ramke danych z datami i godzinami
+godzinowe_dane_zuzycia <- expand.grid(Data = daty, Godzina = sprintf("%02d", c(24, 1:23)))
+
+# Funkcja generujaca godzinowe zuzycie energii dla każdego dnia
+generuj_godzinowe_zuzycie <- function(dzienne_zuzycie) {
+  godzinowy_rozklad <- runif(24, min = 0, max = 1)
+  godzinowe_zuzycie <- dzienne_zuzycie * godzinowy_rozklad / sum(godzinowy_rozklad)
+  return(godzinowe_zuzycie)
+}
+
+# Wypelniamy ramke danych godzinowym zuzyciem energii
+godzinowe_dane_zuzycia$Zuzycie <- c()
+
+for (data in unique(godzinowe_dane_zuzycia$Data)) {
+  dzienne_zuzycie <- runif(1, min = 4, max = 8)
+  godzinowe_zuzycie <- generuj_godzinowe_zuzycie(dzienne_zuzycie)
+  
+  # Wybieramy wiersze dla konkretnego dnia i przypisujemy wartosci godzinowego zuzycia energii
+  godzinowe_dane_zuzycia$Zuzycie[godzinowe_dane_zuzycia$Data == data] <- godzinowe_zuzycie
+}
+
+# Sortujemy ramke danych wedlug daty i godziny
+godzinowe_dane_zuzycia <- godzinowe_dane_zuzycia[order(godzinowe_dane_zuzycia$Data, godzinowe_dane_zuzycia$Godzina), ]
+
+# Resetujemy indeks wierszy
+rownames(godzinowe_dane_zuzycia) <- seq_len(nrow(godzinowe_dane_zuzycia))
+
+# Grupujemy dane wedlug dnia i obliczamy dziennie zuzycie energii
+dzienna_dane <- godzinowe_dane_zuzycia %>%
+  group_by(Data) %>%
+  summarise(DzienneZuzycie = sum(Zuzycie))
+
+# Dodajemy kolumnę z rokiem
+godzinowe_dane_zuzycia$Rok <- year(godzinowe_dane_zuzycia$Data)
+
+# Grupujemy dane według roku i miesiąca, a następnie obliczamy miesięczne zużycie energii
+miesieczne_dane <- godzinowe_dane_zuzycia %>%
+  mutate(Miesiac = month(Data)) %>%
+  group_by(Rok, Miesiac) %>%
+  summarise(MiesieczneZuzycie = sum(Zuzycie))
+
+# Grupujemy dane wedlug roku i obliczamy roczne zuzycie energii
+roczne_zuzycie <- godzinowe_dane_zuzycia %>%
+  mutate(Rok = year(Data)) %>%
+  group_by(Rok) %>%
+  summarise(RoczneZuzycie = sum(Zuzycie))
+
+# Sprawdzamy wyniki
+head(godzinowe_dane_zuzycia)
+head(dzienna_dane)
+head(miesieczne_dane)
+head(roczne_zuzycie)
+
+godzinowe_dane_zuzycia$Godzina <- as.character(godzinowe_dane_zuzycia$Godzina)
+str(godzinowe_dane_zuzycia)
