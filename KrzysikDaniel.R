@@ -12,6 +12,7 @@ library(highcharter)
 library(ggthemes)
 library(scales)
 library(RColorBrewer)
+library(webshot)
 
 # ================================
 # 1. Pobranie i przetwarzanie danych o produkcji energii przez panele PV
@@ -25,6 +26,10 @@ setwd("E:/STUDIA/SEMESTR VI/Inżynierski projekt dyplomowy")
 
 # Pobieranie bieżącego katalogu roboczego
 getwd() 
+
+#alternatywa 
+#plik <- file.choose()
+#godz_moc_PV <- head(read.csv(plik, header = TRUE, sep = ",", skip = 10), -7)
 
 # Wczytywanie danych
 godz_moc_PV <- head(read.csv("Timeseries.csv", header = TRUE, sep = ",", skip = 10), -7)
@@ -53,6 +58,48 @@ godz_moc_PV$Godzina[godz_moc_PV$Godzina == "00"] <- "24"
 #godz_moc_PV$Godzina <- as.integer(godz_moc_PV$Godzina)
 godz_moc_PV$Moc <- as.double(godz_moc_PV$Moc) / 1000
 
+# Utworzenie 2021 i 2022 roku
+ 
+# Obliczenie średniej mocy dla każdej godziny z lat 2018-2020
+srednia_godzinowa <- godz_moc_PV %>%
+  mutate(DzienRoku = yday(Data)) %>%
+  group_by(DzienRoku, Godzina) %>%
+  summarize(SredniaMoc = mean(Moc, na.rm = TRUE), .groups = 'drop')
+
+# Tworzenie pełnej sekwencji dat i godzin dla lat 2021 i 2022
+daty_2021_2022 <- seq(as.Date("2021-01-01"), as.Date("2022-12-31"), by = "day")
+godziny <- sprintf("%02d", c(24,1:23))  
+
+# Rozszerzamy grid do pełnej ramki dat i godzin
+godz_moc_2021_2022 <- expand.grid(Data = daty_2021_2022, Godzina = godziny)
+
+# Usuwamy 29 lutego dla roku 2021, który nie jest przestępny
+godz_moc_2021_2022 <- godz_moc_2021_2022[!((month(godz_moc_2021_2022$Data) == 2) & (day(godz_moc_2021_2022$Data) == 29)),]
+
+# Dodanie identyfikatora dnia roku
+godz_moc_2021_2022$DzienRoku <- yday(godz_moc_2021_2022$Data)
+
+# Dołączanie średnich wartości mocy
+godz_moc_2021_2022 <- left_join(godz_moc_2021_2022, srednia_godzinowa, by = c("DzienRoku", "Godzina"))
+
+# Usuwamy kolumnę DzienRoku, która już nie jest potrzebna
+godz_moc_2021_2022 <- select(godz_moc_2021_2022, Data, Godzina, SredniaMoc)
+
+# Zmieniamy nazwę kolumny z średnią mocą na Moc
+colnames(godz_moc_2021_2022)[3] <- "Moc"
+
+# Sortujemy ramkę danych godz_moc_2021_2022
+godz_moc_2021_2022 <- godz_moc_2021_2022 %>% 
+  arrange(Data, Godzina)
+
+# Dołączamy nowe dane do istniejącej ramki danych
+godz_moc_PV <- bind_rows(godz_moc_PV, godz_moc_2021_2022)
+
+# Upewniamy się, że wszystkie kolumny są odpowiedniego typu
+#godz_moc_PV$Data <- as.Date(godz_moc_PV$Data)
+#godz_moc_PV$Godzina <- as.character(godz_moc_PV$Godzina)
+#godz_moc_PV$Moc <- as.numeric(godz_moc_PV$Moc)
+
 # Analiza roku sredniego, najgorszego i najlepszego
 godz_moc_PV <- godz_moc_PV %>% mutate(Rok = year(Data))
 podsumowanie_roczne <- godz_moc_PV %>%
@@ -72,7 +119,7 @@ rok_najlepszy <- max(podsumowanie_roczne$CalkowitaMoc)
 
 ggplot(godz_moc_PV, aes(x = Data, y = Moc)) +
   geom_line(aes(color = as.factor(Godzina)), linewidth = 1) +
-  facet_wrap(~ Godzina, ncol = 4) +
+  facet_wrap(~ Godzina, ncol = 3) +
   labs(title = "Produkcja energii przez panele PV na przestrzeni czasu",
        x = "Data", y = "Moc (kW)") +
   theme_minimal(base_size = 14) +
@@ -85,8 +132,10 @@ ggplot(godz_moc_PV, aes(x = Data, y = Moc)) +
     panel.grid.major.y = element_line(color = "#e1e1e1", linewidth = 0.5),
     legend.position = "none"
   ) +
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%y") +
   scale_y_continuous(labels = scales::comma)
+
+ggsave("1.1.png", width = 6.3, height = 10, dpi = 300)
 
 
 # ================================
@@ -113,7 +162,9 @@ oba_lata$MiesiacDzien <- format(oba_lata$Data, "%m-%d")
 najgorszy_rok_data <- oba_lata %>% filter(Typ == "Najgorszy rok")
 najlepszy_rok_data <- oba_lata %>% filter(Typ == "Najlepszy rok")
 
-highchart() %>% 
+#?webshot::install_phantomjs(force = TRUE)
+
+hc1.2 <- highchart() %>% 
   hc_title(text = "Porównanie produkcji energii: Najlepszy vs. Najgorszy rok") %>%
   hc_xAxis(categories = najgorszy_rok_data$MiesiacDzien, tickInterval = 30) %>%
   hc_yAxis(title = list(text = "Moc [kW]")) %>%
@@ -129,6 +180,10 @@ highchart() %>%
             itemStyle = list(color = "#000000"),
             itemHoverStyle = list(color = "#333333"),
             symbolRadius = 0)
+
+htmlwidgets::saveWidget(hc1.2, "1.2.html", selfcontained = TRUE)
+
+webshot::webshot("1.2.html", "1.2.png", delay = 5)
 
 # ================================
 # Wizualiacja 3
@@ -167,16 +222,17 @@ ggplot(srednia_godzinowa, aes(x = Godzina, y = SredniaMoc)) +
     panel.grid.minor.x = element_blank()
   )
 
+ggsave("1.3.png", width = 6.3, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 4
 # ================================
 
 # Histogram rozkładu mocy:
 # Pokazuje, jakie wartości mocy są najczęstsze.
-filtered_data <- filter(godz_moc_PV, Moc > 0)
+wybrane_dane <- filter(godz_moc_PV, Moc > 0)
 
-
-ggplot(filtered_data, aes(x = Moc)) +
+ggplot(wybrane_dane, aes(x = Moc)) +
   # Histogram pokazuje, jak często pojawiają się różne wartości mocy.
   geom_histogram(fill = "#2A9D8F", color = "#264653", binwidth = 0.1, alpha = 0.7) +
   
@@ -185,11 +241,10 @@ ggplot(filtered_data, aes(x = Moc)) +
   
   # Etykiety i tytuły
   labs(
-    title = "Rozkład produkcji energii przez panele PV (bez wartości 0)",
+    title = "Rozkład produkcji energii przez panele PV",
     x = "Moc (kW)",
     y = "Częstotliwość",
-    subtitle = "Analiza bazująca na przefiltrowanych danych",
-    caption = "Źródło: Twoje źródło danych"
+    subtitle = "Analiza bazująca na przefiltrowanych danych"
   ) +
   
   # Stylizacja wykresu
@@ -203,6 +258,8 @@ ggplot(filtered_data, aes(x = Moc)) +
     panel.grid.minor.x = element_blank()
   )
 
+ggsave("1.4.png", width = 6, height = 6.5, dpi = 300)
+
 # ================================
 # Wizualiacja 5
 # ================================
@@ -210,7 +267,7 @@ ggplot(filtered_data, aes(x = Moc)) +
 # Interaktywny wykres przy użyciu highcharter przedstawiający roczną produkcję energii:
 # Pokazuje, jak roczna produkcja energii zmieniała się na przestrzeni lat.
 
-hchart(podsumowanie_roczne, "column", hcaes(x = Rok, y = CalkowitaMoc)) %>%
+hc1.5 <- hchart(podsumowanie_roczne, "column", hcaes(x = Rok, y = CalkowitaMoc)) %>%
   hc_title(text = "Roczna produkcja energii przez panele PV", margin = 20, style = list(fontSize = "18px")) %>%
   hc_xAxis(title = list(text = "Rok"), lineColor = '#999999', lineWidth = 1, tickLength = 5, gridLineWidth = 0.5) %>%
   hc_yAxis(title = list(text = "Całkowita Moc (kW)"), lineColor = '#999999', lineWidth = 1, gridLineWidth = 0.5) %>%
@@ -224,7 +281,7 @@ hchart(podsumowanie_roczne, "column", hcaes(x = Rok, y = CalkowitaMoc)) %>%
       colorByPoint = TRUE,
       states = list(
         hover = list(
-          brightness = -0.1, # Nieco przyciemnienie słupka
+          brightness = -0.1,
           shadow = list(
             color = 'gray',
             offsetX = 0,
@@ -235,8 +292,10 @@ hchart(podsumowanie_roczne, "column", hcaes(x = Rok, y = CalkowitaMoc)) %>%
         )
       )
     )
-  ) %>%
-  hc_credits(enabled = TRUE, text = "Źródło: Twoje Źródło", href = "", position = list(align = "right", verticalAlign = "bottom"), style = list(fontSize = "10px"))
+  )
+htmlwidgets::saveWidget(hc1.5, "1.5.html", selfcontained = TRUE)
+
+webshot::webshot("1.5.html", "1.5.png", delay = 5)
 
 # ================================
 # 2. Pobranie i przetwarzanie danych o rynkowej cenie energii elektrycznej
@@ -315,8 +374,9 @@ godzinowa_cena_energii$RCE <- godzinowa_cena_energii$RCE / 1000
 # ================================
 
 # Wykres Ceny w Czasie: Wyświetla zmienność ceny energii elektrycznej na przestrzeni czasu.
-# Wykres porównawczy z gładką krzywą (loess):
-# Pokazuje trend cen energii wraz z gładką krzywą, która uwypukla ogólny trend.
+# krzywa loess - Jest to linia trendu, wygładzona metoda loess, która wskazuje ogólny trend w danych. 
+# Dzięki tej krzywej można zobaczyć, czy ceny mają tendencję do wzrostu, spadku, czy 
+# też są stabilne w dłuższej perspektywie czasowej.
 ggplot(godzinowa_cena_energii, aes(x = Data, y = RCE)) +
   # Rzeczywiste dane
   geom_line(aes(color = "Rzeczywiste dane"), size = 1) +
@@ -336,10 +396,9 @@ ggplot(godzinowa_cena_energii, aes(x = Data, y = RCE)) +
   # Manualne kolory dla linii
   scale_color_manual(values = c("Rzeczywiste dane" = "blue", "Trend (loess)" = "red")) +
   
-  # Czysty temat wykresu
   theme_minimal() +
   
-  # Dodatkowe modyfikacje tematu
+  # Dodatkowe modyfikacje
   theme(
     plot.title = element_text(hjust = 0.5, size = 16),
     plot.subtitle = element_text(hjust = 0.5, size = 12),
@@ -349,6 +408,8 @@ ggplot(godzinowa_cena_energii, aes(x = Data, y = RCE)) +
     legend.title = element_text(size = 12),
     legend.text = element_text(size = 12)
   )
+
+ggsave("2.1.png", width = 6.3, height = 10, dpi = 300)
 
 # ================================
 # Wizualiacja 2
@@ -377,22 +438,24 @@ ggplot(godzinowa_cena_energii, aes(x = RCE)) +
     y = "Częstotliwość"
   ) +
   
-  # Czysty temat wykresu
   theme_minimal() +
   
-  # Dodatkowe modyfikacje tematu
+  # Dodatkowe modyfikacje
   theme(
     plot.title = element_text(hjust = 0.5, size = 16),
     axis.title.x = element_text(size = 14),
     axis.title.y = element_text(size = 14)
   )
 
+ggsave("2.2.png", width = 6.3, height = 8, dpi = 300)
+
+
 # ================================
 # Wizualiacja 3
 # ================================
 
 # Wykres średniej ceny energii w ciągu miesiąca:
-# Pozwala to zrozumieć, czy są jakieś sezony, w których ceny są wyższe lub niższe.
+# Pozwala zrozumieć, czy są jakieś sezony, w których ceny są wyższe lub niższe.
 godzinowa_cena_energii$Rok <- year(godzinowa_cena_energii$Data)
 
 # Zamieniamy numeryczne wartości miesiąca na nazwy w języku polskim
@@ -413,6 +476,8 @@ ggplot(srednia_miesieczna, aes(x = NazwaMiesiaca, y = SredniaCena, color = as.fa
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_x_discrete(limits = nazwy_miesiecy)  # Upewniamy się, że kolejność miesięcy jest zachowana
+
+ggsave("2.3.png", width = 6.5, height = 10, dpi = 300)
 
 # ================================
 # 3. Analiza średniego dziennego zużycia energii
@@ -437,12 +502,18 @@ wspolczynniki_por_roku <- c(zima = 1.2, wiosna = 1.0, lato = 0.8, jesien = 1.1)
 
 # Funkcja generująca godzinowy rozkład zużycia energii w zależności od pory roku
 godzinowy_rozklad_zuzycia <- function(pora) {
-  # Określanie rozkładu godzinowego w zależności od pory roku
-  # Dla przykładu w jesieni między godziną 18 a 20 jest największe zużycie
-  if(pora == "zima") return(c(rep(1.1, 7), rep(1.3, 9), rep(1.5, 3), rep(1.2, 5)))
-  if(pora == "wiosna") return(c(rep(1, 7), rep(1.2, 10), rep(1.4, 3), rep(1.1, 4)))
-  if(pora == "lato") return(c(rep(0.9, 8), rep(1, 9), rep(1.3, 3), rep(1, 4)))
-  if(pora == "jesien") return(c(rep(1, 7), rep(1.2, 8), rep(1.6, 3), rep(1.3, 6)))
+  if(pora == "zima") {
+    return(c(rep(0.3, 5), 0.5, 0.7, rep(1.2, 3), rep(1.0, 4), rep(1.5, 5), 1.3, 1.0, rep(0.6, 2), 0.4))
+  }
+  if(pora == "wiosna") {
+    return(c(rep(0.2, 5), 0.4, 0.6, rep(1.0, 3), rep(0.9, 4), rep(1.4, 5), 1.2, 0.9, rep(0.5, 2), 0.3))
+  }
+  if(pora == "lato") {
+    return(c(rep(0.1, 5), 0.2, 0.4, rep(0.8, 3), rep(0.7, 4), rep(1.2, 5), 0.9, 0.7, rep(0.3, 2), 0.2))
+  }
+  if(pora == "jesien") {
+    return(c(rep(0.25, 5), 0.45, 0.65, rep(1.1, 3), rep(1.0, 4), rep(1.3, 5), 1.1, 0.8, rep(0.55, 2), 0.35))
+  }
 }
 
 # Tworzymy sekwencje dat na podstawie roku
@@ -526,6 +597,8 @@ ggplot(miesieczne_dane, aes(x = Miesiac, y = MiesieczneZuzycie, fill = as.factor
         legend.title = element_blank(),
         legend.position = "right")
 
+ggsave("3.1.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 2
 # ================================
@@ -551,6 +624,8 @@ ggplot(srednie_godzinowe_zuzycie, aes(x = Godzina, y = SrednieZuzycie, fill = Sr
   theme_minimal(base_size = 15) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave("3.2.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # 4. Analiza kosztów i korzyści z zastosowania paneli PV:
 # ================================
@@ -563,7 +638,7 @@ ggplot(srednie_godzinowe_zuzycie, aes(x = Godzina, y = SrednieZuzycie, fill = Sr
 godzinowe_dane_zuzycia
 godzinowa_cena_energii 
 
-# Połącz dane
+# Połączenie danych
 dane_zuzycia_i_kosztu <- merge(godzinowe_dane_zuzycia, godzinowa_cena_energii, by=c("Data","Godzina"))
 
 # Usuwanie niepotrzebnej kolumny
@@ -572,14 +647,14 @@ dane_zuzycia_i_kosztu <- dane_zuzycia_i_kosztu[,-6]
 # Obliczanie kosztu energii dla kazdej godziny
 dane_zuzycia_i_kosztu$Koszt <- dane_zuzycia_i_kosztu$Zuzycie * dane_zuzycia_i_kosztu$RCE
 
-# Dodajemy kolumnę Rok do dalszej analizy
+# Dodanie kolumny Rok do dalszej analizy
 dane_zuzycia_i_kosztu$Rok <- format(as.Date(dane_zuzycia_i_kosztu$Data), "%Y")
 
 # Wyswietlanie danych
 head(dane_zuzycia_i_kosztu)
 
 # Podsumowanie
-sumaryczny_koszt <- sum(dane_zuzycia_i_kosztu$Koszt, na.rm=TRUE)  # Oblicz całkowity koszt energii dla całego roku
+sumaryczny_koszt <- sum(dane_zuzycia_i_kosztu$Koszt, na.rm=TRUE)  # całkowity koszt energii dla całego roku
 
 # Obliczamy dzienny koszt dla każdej daty
 koszt_dzienny <- dane_zuzycia_i_kosztu %>%
@@ -632,6 +707,8 @@ ggplot(koszt_miesieczny, aes(x = Miesiac, y = KosztMiesieczny, color = as.factor
         legend.title = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave("4.1a.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 2
 # ================================
@@ -650,7 +727,7 @@ koszt_roczny <- koszt_roczny %>%
 kolory <- brewer.pal(9, "Set1")
 
 # Wykres skumulowanych rocznych kosztów energii
-hchart(koszt_roczny, "line", hcaes(x = Rok, y = SkumulowanyKoszt)) %>%
+hc4.2a<- hchart(koszt_roczny, "line", hcaes(x = Rok, y = SkumulowanyKoszt)) %>%
   hc_title(text = "Skumulowane roczne koszty energii") %>%
   hc_subtitle(text = "Analiza kosztów energii na przestrzeni lat") %>%
   hc_xAxis(title = list(text = "Rok"), categories = koszt_roczny$Rok, crosshair = TRUE) %>%
@@ -664,25 +741,29 @@ hchart(koszt_roczny, "line", hcaes(x = Rok, y = SkumulowanyKoszt)) %>%
   hc_exporting(enabled = TRUE) %>%
   hc_legend(enabled = TRUE)
 
+htmlwidgets::saveWidget(hc4.2a, "4.2a.html", selfcontained = TRUE)
+
+webshot::webshot("4.2a.html", "4.2a.png", delay = 5)
+
 # ================================
 # 4.2 Analiza sytuacji z panelami PV bez magazynu: w tym scenariuszu nadmiar energii generowany przez panele jest marnowany
 # ================================
 
-# Dołącz dane o produkcji energii przez panele PV
+# Dołączenie danych o produkcji energii przez panele PV
 dane_z_panelami <- merge(dane_zuzycia_i_kosztu, godz_moc_PV, by=c("Data","Godzina"))
 
 dane_z_panelami$Rok <- dane_z_panelami$Rok.x  # nadpisanie kolumny 'Rok' wartościami z kolumny 'Rok.x'
 dane_z_panelami$Rok.x <- NULL  # usunięcie kolumny 'Rok.x'
 dane_z_panelami$Rok.y <- NULL  # usunięcie kolumny 'Rok.y'
 
-# Oblicz różnicę pomiędzy generowaną mocą a zużyciem
+# Obliczenie różnicy pomiędzy generowaną mocą a zużyciem
 dane_z_panelami$Roznica <- dane_z_panelami$Moc - dane_z_panelami$Zuzycie
 
-# Oblicz, ile energii jest marnowane i ile musi być dokupione
+# Obliczenie, ile energii jest marnowane i ile musi być dokupione
 dane_z_panelami$Marnowane <- pmax(0, dane_z_panelami$Roznica)  # jeśli różnica jest dodatnia, marnujemy energię
 dane_z_panelami$Dokupione <- pmax(0, -dane_z_panelami$Roznica) # jeśli różnica jest ujemna, musimy dokupić energię
 
-# Oblicz koszt dokupionej energii
+# Obliczenie kosztu dokupionej energii
 dane_z_panelami$KosztDokupionej <- dane_z_panelami$Dokupione * dane_z_panelami$RCE
 
 # Podsumowanie
@@ -727,6 +808,8 @@ ggplot(koszt_miesieczny, aes(x = Miesiac, y = KosztMiesieczny, color = as.factor
         legend.title = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave("4.1b.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 2
 # ================================
@@ -745,7 +828,7 @@ roczne_koszty_paneli <- roczne_koszty_paneli %>%
 kolory <- brewer.pal(9, "Set1")
 
 # Wykres skumulowanych rocznych kosztów energii
-hchart(roczne_koszty_paneli, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakupionejEnergii)) %>%
+hc4.2b <- hchart(roczne_koszty_paneli, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakupionejEnergii)) %>%
   hc_title(text = "Skumulowane roczne koszty Energii przy użyciu paneli PV (Bez Magazynu)") %>%
   hc_subtitle(text = "Analiza kosztów energii na przestrzeni lat (nadmiar energii z PV jest marnowany)") %>%
   hc_xAxis(title = list(text = "Rok"), categories = roczne_koszty_paneli$Rok, crosshair = TRUE) %>%
@@ -759,12 +842,109 @@ hchart(roczne_koszty_paneli, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakupi
   hc_exporting(enabled = TRUE) %>%
   hc_legend(enabled = TRUE)
 
+htmlwidgets::saveWidget(hc4.2b, "4.2b.html", selfcontained = TRUE)
+
+webshot::webshot("4.2b.html", "4.2b.png", delay = 5)
+
 # ================================
-# 4.3 Analiza sytuacji bez paneli PV: obliczenie kosztu zakupu energii przy braku paneli
+# 4.3 Analiza sytuacji z panelami PV bez magazynu: w tym scenariuszu nadmiar energii generowany przez panele jest natychmiast sprzedawany do sieci
+# ================================
+
+# Używając wcześniejszych danych z "dane_z_panelami"
+dane_z_panelami$Sprzedane <- pmax(0, dane_z_panelami$Roznica)  # jeśli różnica jest dodatnia, sprzedajemy energię do sieci
+
+# Teraz uwzględniamy, że cena sprzedaży energii do sieci jest niższa o 4% od jej kosztu zakupu
+dane_z_panelami$DochodZeSprzedazy <- dane_z_panelami$Sprzedane * dane_z_panelami$RCE * 0.96
+
+# Obliczenie, ile energii musi być dokupione (jeśli różnica jest ujemna)
+dane_z_panelami$Dokupione <- pmax(0, -dane_z_panelami$Roznica)
+
+# Obliczenie kosztu dokupionej energii
+dane_z_panelami$KosztDokupionej <- dane_z_panelami$Dokupione * dane_z_panelami$RCE
+
+# Podsumowanie
+koszt_dokupionej <- sum(dane_z_panelami$KosztDokupionej, na.rm=TRUE)
+dochod_ze_sprzedazy <- sum(dane_z_panelami$DochodZeSprzedazy, na.rm=TRUE)
+
+# ================================
+# Wizualizacja 1
+# ================================
+
+# Obliczamy miesięczne dochody ze sprzedaży energii oraz miesięczny koszt zakupionej energii
+analiza_miesieczna <- dane_z_panelami %>%
+  group_by(Rok, Miesiac) %>%
+  summarise(DochodMiesieczny = sum(DochodZeSprzedazy, na.rm=TRUE),
+            KosztMiesieczny = sum(KosztDokupionej, na.rm=TRUE))
+
+# Obliczamy miesięczny zysk netto
+analiza_miesieczna <- analiza_miesieczna %>%
+  mutate(ZyskMiesieczny = DochodMiesieczny - KosztMiesieczny)
+
+# Zamiana numeru miesiąca na polską nazwę
+analiza_miesieczna$Miesiac <- polskie_miesiace[analiza_miesieczna$Miesiac]
+
+# Ustalenie kolejności miesięcy w ramce danych
+analiza_miesieczna <- analiza_miesieczna %>%
+  mutate(Miesiac = factor(Miesiac, levels = polskie_miesiace))
+
+# Wykres
+ggplot(analiza_miesieczna, aes(x = Miesiac, y = ZyskMiesieczny, color = as.factor(Rok), group = Rok)) +
+  geom_line(size = 1) +
+  geom_point(size = 3, shape = 21, fill = "white") +
+  scale_color_manual(values = kolory) +
+  labs(title = "Miesięczny zysk netto z energii przez lata",
+       subtitle = "Analiza sezonowości zysku netto",
+       x = "Miesiąc",
+       y = "Zysk Netto Miesięczny [PLN]",
+       color = "Rok") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right", 
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("4.1c.png", width = 6.5, height = 10, dpi = 300)
+
+# ================================
+# Wizualizacja 2
+# ================================
+
+# Obliczamy roczne koszty i dochody na podstawie danych_z_panelami
+roczne_analiza <- dane_z_panelami %>%
+  group_by(Rok) %>%
+  summarise(RoczneDochody = sum(DochodZeSprzedazy, na.rm = TRUE),
+            RoczneWydatkiZakupionejEnergii = sum(KosztDokupionej, na.rm = TRUE))
+
+# Obliczamy roczny zysk netto oraz skumulowany zysk netto
+roczne_analiza <- roczne_analiza %>%
+  arrange(Rok) %>%
+  mutate(RocznyZyskNetto = RoczneDochody - RoczneWydatkiZakupionejEnergii,
+         SkumulowanyZyskNetto = cumsum(RocznyZyskNetto))
+
+# Wykres skumulowanego rocznego zysku netto
+hc4.2c <- hchart(roczne_analiza, "line", hcaes(x = Rok, y = SkumulowanyZyskNetto)) %>%
+  hc_title(text = "Skumulowany roczny zysk netto przy użyciu paneli PV (Bez Magazynu)") %>%
+  hc_subtitle(text = "Analiza zysku netto na przestrzeni lat (nadmiar energii z PV sprzedawany do sieci)") %>%
+  hc_xAxis(title = list(text = "Rok"), categories = roczne_analiza$Rok, crosshair = TRUE) %>%
+  hc_yAxis(title = list(text = "Skumulowany Zysk Netto [PLN]"), opposite = FALSE, crosshair = TRUE) %>%
+  hc_add_series(roczne_analiza, "point", hcaes(x = Rok, y = SkumulowanyZyskNetto), name = "Zysk Netto",
+                dataLabels = list(enabled = TRUE, format = '{point.y:,.0f} zł', style = list(fontSize = '10px'))) %>%
+  hc_tooltip(headerFormat = "<b>Rok {point.x}</b><br/>",
+             pointFormat = "Skumulowany Koszt: <b>{point.y:.2f} zł</b>") %>%
+  hc_colors(kolory) %>%
+  hc_chart(zoomType = 'xy') %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_legend(enabled = TRUE)
+
+htmlwidgets::saveWidget(hc4.2c, "4.2c.html", selfcontained = TRUE)
+
+webshot::webshot("4.2c.html", "4.2c.png", delay = 5)
+             
+# ================================
+# 4.4 Analiza sytuacji z magazynem energii: Nadmiar energii jest marnowany.
 # ================================
 
 # Wstępne parametry magazynu
-pojemnosc_magazynu <- 10 
+pojemnosc_magazynu <- 2
 sprawnosc_magazynowania <- 0.90 
 stan_magazynu <- 0 
 
@@ -823,7 +1003,7 @@ roczne_koszty_z_magazynem <- dane_z_magazynem %>%
 # Grupowanie i obliczanie kosztów miesięcznych dla energii dokupionej z magazynem
 koszt_miesieczny_magazyn <- dane_z_magazynem %>%
   group_by(Rok, Miesiac) %>%
-  summarise(KosztMiesiecznyMagazyn = sum(DokupioneZSieci * RCE, na.rm=TRUE)) # zakładam, że 'RCE' to cena jednostkowa energii
+  summarise(KosztMiesiecznyMagazyn = sum(DokupioneZSieci * RCE, na.rm=TRUE)) 
 
 # Zamiana numeru miesiąca na polską nazwę
 koszt_miesieczny_magazyn$Miesiac <- polskie_miesiace[koszt_miesieczny_magazyn$Miesiac]
@@ -847,6 +1027,8 @@ ggplot(koszt_miesieczny_magazyn, aes(x = Miesiac, y = KosztMiesiecznyMagazyn, co
         legend.title = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave("4.1d.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 2
 # ================================
@@ -865,7 +1047,7 @@ roczne_koszty_magazyn <- roczne_koszty_magazyn %>%
 kolory <- brewer.pal(9, "Set1")
 
 # Wykres skumulowanych rocznych kosztów energii z wykorzystaniem magazynu
-hchart(roczne_koszty_magazyn, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakupionejEnergii)) %>%
+hc4.2d <- hchart(roczne_koszty_magazyn, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakupionejEnergii)) %>%
   hc_title(text = "Skumulowane roczne koszty Energii przy użyciu Magazynu Energii") %>%
   hc_subtitle(text = "Analiza kosztów energii na przestrzeni lat z uwzględnieniem magazynowania nadmiarów energii z PV") %>%
   hc_xAxis(title = list(text = "Rok"), categories = roczne_koszty_magazyn$Rok, crosshair = TRUE) %>%
@@ -879,8 +1061,120 @@ hchart(roczne_koszty_magazyn, "line", hcaes(x = Rok, y = SkumulowaneWydatkiZakup
   hc_exporting(enabled = TRUE) %>%
   hc_legend(enabled = TRUE)
 
+htmlwidgets::saveWidget(hc4.2d, "4.2d.html", selfcontained = TRUE)
+
+webshot::webshot("4.2d.html", "4.2d.png", delay = 5)
+
 # ================================
-# 4.4 Analiza sytuacji z magazynem i sprzedażą nadmiaru: Gdy magazyn jest pełny, nadmiar energii jest sprzedawany.
+# 4.5 Analiza sytuacji z różnymi pojemnościami magazynu i marnowaniem nadmiaru: Gdy magazyn jest pełny, nadmiar energii jest marnowany.
+# ================================
+
+# Definicje różnych pojemności magazynu
+pojemnosci_magazynu <- c(2, 5, 7, 10, 13, 15, 17)
+
+# Zbieranie danych do analizy
+wyniki_rozne_pojemnosci <- data.frame()
+
+# Pętla dla każdej pojemności magazynu
+for(pojemnosc in pojemnosci_magazynu) {
+  pojemnosc_magazynu <- pojemnosc
+  sprawnosc_magazynowania <- 0.90
+  stan_magazynu <- 0
+  
+  # Przetwarzanie danych dla każdej pojemności
+  dane_z_magazynem <- dane_z_panelami
+  # Dodawanie nowych kolumn
+  dane_z_magazynem$PobranoZMagazynu <- 0
+  dane_z_magazynem$DokupioneZSieci <- 0
+  dane_z_magazynem$WlozonoDoMagazynu <- 0
+  
+  for(i in 1:nrow(dane_z_magazynem)) {
+    Moc <- dane_z_magazynem$Moc[i]
+    Zuzycie <- dane_z_magazynem$Zuzycie[i]
+    
+    if(Moc > Zuzycie) {
+      nadmiar <- Moc - Zuzycie
+      miejsce_w_magazynie <- pojemnosc_magazynu - stan_magazynu
+      do_magazynu <- min(nadmiar, miejsce_w_magazynie)
+      dane_z_magazynem$WlozonoDoMagazynu[i] <- do_magazynu
+      stan_magazynu <- min(stan_magazynu + do_magazynu, pojemnosc_magazynu)
+    } else {
+      brakuje <- Zuzycie - Moc
+      dostepne_w_magazynie <- stan_magazynu * sprawnosc_magazynowania
+      z_magazynu <- min(brakuje, dostepne_w_magazynie)
+      dane_z_magazynem$PobranoZMagazynu[i] <- z_magazynu
+      stan_magazynu <- max(stan_magazynu - z_magazynu/sprawnosc_magazynowania, 0)
+      brakuje <- brakuje - z_magazynu
+      dane_z_magazynem$DokupioneZSieci[i] <- brakuje
+    }
+  }
+  
+  # Podsumowanie kosztów dla każdej pojemności
+  roczne_koszty_magazyn <- dane_z_magazynem %>%
+    group_by(Rok) %>%
+    summarise(RoczneWydatkiZakupionejEnergii = sum(DokupioneZSieci * RCE, na.rm = TRUE))
+  
+  wyniki_rozne_pojemnosci <- rbind(wyniki_rozne_pojemnosci, transform(roczne_koszty_magazyn, PojemnoscMagazynu = pojemnosc))
+}
+
+# ================================
+# Wizualiacja 1
+# ================================
+
+# Wykres Słupkowy Porównujący Roczne Koszty Zakupionej Energii dla Różnych Pojemności Magazynu
+ggplot(wyniki_rozne_pojemnosci, aes(x = factor(Rok), y = RoczneWydatkiZakupionejEnergii, fill = factor(PojemnoscMagazynu))) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_brewer(palette = "Set3") +  
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"), 
+    plot.subtitle = element_text(hjust = 0.5, size = 12), 
+    axis.title.x = element_text(size = 12, face = "bold"), 
+    axis.title.y = element_text(size = 12, face = "bold"), 
+    legend.title = element_text(face = "bold"), 
+    legend.position = "bottom" 
+  ) +
+  labs(
+    title = "Roczne Koszty Zakupionej Energii w Zależności od Pojemności Magazynu",
+    x = "Rok",
+    y = "Koszt Zakupionej Energii [PLN]",
+    fill = "Pojemność Magazynu"
+  ) +
+  geom_text(aes(label=sprintf("%.2f", RoczneWydatkiZakupionejEnergii)), vjust=-0.3, position = position_dodge(0.9), size=3)
+
+ggsave("hc4.2v1.png", width = 11.5, height = 11, dpi = 300)
+
+# ================================
+# Wizualiacja 2
+# ================================
+
+# Obliczanie skumulowanych wydatków
+wynik_finalowy <- wyniki_rozne_pojemnosci %>%
+  arrange(Rok, PojemnoscMagazynu) %>%
+  group_by(PojemnoscMagazynu) %>%
+  mutate(SkumulowaneWydatki = cumsum(RoczneWydatkiZakupionejEnergii)) %>%
+  ungroup()
+
+# Tworzenie wykresu
+hc4.2v2 <- hchart(wynik_finalowy, "line", hcaes(x = Rok, y = SkumulowaneWydatki, group = PojemnoscMagazynu)) %>%
+  hc_title(text = "Skumulowane Roczne Wydatki na Energię przy Użyciu Magazynu Energii") %>%
+  hc_subtitle(text = "Analiza wydatków na energię na przestrzeni lat z uwzględnieniem różnych pojemności magazynów") %>%
+  hc_xAxis(title = list(text = "Rok"), tickInterval = 1) %>%
+  hc_yAxis(title = list(text = "Skumulowane Wydatki [PLN]")) %>%
+  hc_colors(c("#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9")) %>%
+  hc_legend(title = list(text = "Pojemność Magazynu"), enabled = TRUE, layout = "vertical", align = "right", verticalAlign = "middle", useHTML = TRUE, labelFormatter = JS("function() { return this.name + ' <span style=\"color: ' + this.color + '\">&#9679;</span>'; }")) %>%
+  hc_add_theme(hc_theme_google()) %>%
+  hc_tooltip(headerFormat = "<b>Rok {point.key}</b><br/>", 
+             pointFormat = "<span style='color:{series.color}'>\u25CF</span> {series.name}: {point.y:,.2f} zł<br/>", 
+             shared = TRUE, 
+             crosshairs = TRUE)
+
+# Zapis do pliku HTML i konwersja na obraz PNG
+htmlwidgets::saveWidget(hc4.2v2, "hc4.2v2.html", selfcontained = TRUE)
+webshot::webshot("hc4.2v2.html", "hc4.2v2.png", delay = 5)
+
+# ================================
+# 4.6 Analiza sytuacji z magazynem i sprzedażą nadmiaru: Gdy magazyn jest pełny, nadmiar energii jest sprzedawany.
 # ================================
 
 # Dodanie kolumny dla sprzedanej energii oraz dochodu z tej sprzedaży
@@ -909,8 +1203,8 @@ for(i in 1:nrow(dane_z_magazynem)) {
       sprzedane <- nadmiar - miejsce_w_magazynie
       dane_z_magazynem$SprzedanoEnergie[i] <- sprzedane
       
-      # Obliczenie dochodu ze sprzedaży energii. Zakładamy, że dochód wynosi 80% wartości sprzedanej energii pomnożonej przez RCE.
-      dane_z_magazynem$DochodZeSprzedazy[i] <- sprzedane * dane_z_magazynem$RCE[i] * 0.8
+      # Obliczenie dochodu ze sprzedaży energii. Zakładamy, że dochód wynosi 96% wartości sprzedanej energii pomnożonej przez RCE.
+      dane_z_magazynem$DochodZeSprzedazy[i] <- sprzedane * dane_z_magazynem$RCE[i] * 0.96
     }
     
   } else {
@@ -971,6 +1265,8 @@ ggplot(zysk_miesieczny_magazyn, aes(x = Miesiac, y = ZyskMiesiecznyMagazyn, colo
         legend.title = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggsave("4.1e.png", width = 6.5, height = 10, dpi = 300)
+
 # ================================
 # Wizualiacja 2
 # ================================
@@ -989,7 +1285,7 @@ roczne_zyski_netto_magazyn <- roczne_zyski_netto_magazyn %>%
 kolory <- brewer.pal(9, "Set1")
 
 # Wykres skumulowanych rocznych zysków netto z energii sprzedanej z wykorzystaniem magazynu
-hchart(roczne_zyski_netto_magazyn, "line", hcaes(x = Rok, y = SkumulowaneZyskiNetto)) %>%
+hc4.2e <- hchart(roczne_zyski_netto_magazyn, "line", hcaes(x = Rok, y = SkumulowaneZyskiNetto)) %>%
   hc_title(text = "Skumulowane roczne zyski netto ze Sprzedaży Energii przy użyciu Magazynu Energii") %>%
   hc_subtitle(text = "Analiza zysków netto ze sprzedaży energii na przestrzeni lat z uwzględnieniem magazynowania nadmiarów energii z PV") %>%
   hc_xAxis(title = list(text = "Rok"), categories = roczne_zyski_netto_magazyn$Rok, crosshair = TRUE) %>%
@@ -1002,3 +1298,147 @@ hchart(roczne_zyski_netto_magazyn, "line", hcaes(x = Rok, y = SkumulowaneZyskiNe
   hc_chart(zoomType = 'xy') %>%
   hc_exporting(enabled = TRUE) %>%
   hc_legend(enabled = TRUE)
+
+htmlwidgets::saveWidget(hc4.2e, "4.2e.html", selfcontained = TRUE)
+
+webshot::webshot("4.2e.html", "4.2e.png", delay = 5)
+
+# ================================
+# 4.7 Analiza sytuacji z różnymi pojemnościami magazynu i sprzedażą nadmiaru: Gdy magazyn jest pełny, nadmiar energii jest sprzedawany.
+# ================================
+
+# Definicje różnych pojemności magazynu
+pojemnosci_magazynu <- c(7, 8, 9, 10) 
+
+# Zbieranie danych do wykresu
+wyniki <- data.frame()
+
+# Pętla dla każdej pojemności magazynu
+for(pojemnosc in pojemnosci_magazynu) {
+  
+  # Ustawienie początkowych parametrów magazynu
+  pojemnosc_magazynu <- pojemnosc
+  sprawnosc_magazynowania <- 0.90 
+  stan_magazynu <- 0 
+  rezultaty_analizy_pojemnosc <- data.frame()
+  
+  # Tworzenie kopii danych z panelami i dodanie nowych kolumn
+  dane_z_magazynem <- dane_z_panelami
+  dane_z_magazynem$PobranoZMagazynu <- 0
+  dane_z_magazynem$DokupioneZSieci <- 0
+  dane_z_magazynem$WlozonoDoMagazynu <- 0
+  dane_z_magazynem$SprzedanoEnergie <- 0
+  dane_z_magazynem$DochodZeSprzedazy <- 0
+  
+  # Iteracja przez każdy wiersz (czyli każdą godzinę)
+  for(i in 1:nrow(dane_z_magazynem)) {
+    
+    # Pobieranie danych dla bieżącej godziny
+    Moc <- dane_z_magazynem$Moc[i]
+    Zuzycie <- dane_z_magazynem$Zuzycie[i]
+    
+    # Sprawdzenie czy w danej godzinie energia produkowana przez panele przekracza zużycie.
+    if(Moc > Zuzycie) {
+      nadmiar <- Moc - Zuzycie
+      miejsce_w_magazynie <- pojemnosc_magazynu - stan_magazynu
+      do_magazynu <- min(nadmiar, miejsce_w_magazynie)
+      
+      # Aktualizacja wartości energii dodanej do magazynu.
+      dane_z_magazynem$WlozonoDoMagazynu[i] <- do_magazynu
+      stan_magazynu <- stan_magazynu + do_magazynu
+      
+      # Jeśli nadmiar energii przekracza pojemność magazynu, nadmiar jest sprzedawany
+      if(nadmiar > miejsce_w_magazynie) {
+        sprzedane <- nadmiar - miejsce_w_magazynie
+        dane_z_magazynem$SprzedanoEnergie[i] <- sprzedane
+        
+        # Obliczenie dochodu ze sprzedaży energii. Zakładamy, że dochód wynosi 96% wartości sprzedanej energii pomnożonej przez RCE.
+        dane_z_magazynem$DochodZeSprzedazy[i] <- sprzedane * dane_z_magazynem$RCE[i] * 0.96
+      }
+      
+    } else {
+      # Jeśli moc jest mniejsza niż zużycie, konieczne jest pobranie energii z magazynu lub zakupienie jej
+      brakuje <- Zuzycie - Moc
+      dostepne_w_magazynie <- stan_magazynu * sprawnosc_magazynowania
+      z_magazynu <- min(brakuje, dostepne_w_magazynie)
+      dane_z_magazynu <- min(brakuje, dostepne_w_magazynie)
+      dane_z_magazynem$PobranoZMagazynu[i] <- z_magazynu
+      # Aktualizacja stanu magazynu po pobraniu potrzebnej ilości energii.
+      stan_magazynu <- stan_magazynu - z_magazynu/sprawnosc_magazynowania
+      brakuje <- brakuje - z_magazynu
+      # Jeśli brakuje więcej energii niż jest dostępne w magazynie, resztę musimy zakupić z sieci.
+      dane_z_magazynem$DokupioneZSieci[i] <- brakuje
+    }
+  }
+  
+  # Agregacja wyników dla każdej pojemności magazynu
+  rezultaty_analizy_pojemnosc <- dane_z_magazynem %>%
+    group_by(Rok) %>%
+    summarise(
+      RocznyZyskNetto = sum(DochodZeSprzedazy, na.rm = TRUE) - sum(DokupioneZSieci * RCE, na.rm = TRUE)
+    ) %>%
+    mutate(PojemnoscMagazynu = pojemnosc)
+  
+  wyniki <- rbind(wyniki, rezultaty_analizy_pojemnosc)
+}
+
+# ================================
+# Wizualiacja 1
+# ================================
+
+# Obliczanie skumulowanego zysku netto
+wynik_finalowy <- wyniki %>%
+  arrange(Rok, PojemnoscMagazynu) %>%
+  group_by(PojemnoscMagazynu) %>%
+  mutate(SkumulowanyZyskNetto = cumsum(RocznyZyskNetto)) %>%
+  ungroup()
+
+hc4.1f <- hchart(wynik_finalowy, "line", hcaes(x = Rok, y = SkumulowanyZyskNetto, group = PojemnoscMagazynu)) %>%
+  hc_title(text = "Skumulowane Roczne Zyski Netto ze Sprzedaży Energii przy Użyciu Magazynu Energii") %>%
+  hc_subtitle(text = "Analiza zysków netto ze sprzedaży energii na przestrzeni lat z uwzględnieniem różnych pojemności magazynów") %>%
+  hc_xAxis(title = list(text = "Rok"), tickInterval = 1) %>%
+  hc_yAxis(title = list(text = "Skumulowany Zysk Netto [PLN]")) %>%
+  hc_colors(c("#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9")) %>%
+  hc_legend(title = list(text = "Pojemność Magazynu"), enabled = TRUE, layout = "vertical", align = "right", verticalAlign = "middle", useHTML = TRUE, labelFormatter = JS("function() { return this.name + ' <span style=\"color: ' + this.color + '\">&#9679;</span>'; }")) %>%
+  hc_add_theme(hc_theme_google()) %>%
+  hc_tooltip(headerFormat = "<b>Rok {point.key}</b><br/>", 
+             pointFormat = "<span style='color:{series.color}'>\u25CF</span> {series.name}: {point.y:,.2f} zł<br/>", 
+             shared = TRUE, 
+             crosshairs = TRUE)
+
+htmlwidgets::saveWidget(hc4.1f, "4.1f.html", selfcontained = TRUE)
+
+webshot::webshot("4.1f.html", "4.1f.png", delay = 5)
+
+# ================================
+# Wizualiacja 2
+# ================================
+
+#Wykres Słupkowy Porównujący Roczne Zyski Netto dla Różnych Pojemności Magazynu
+ggplot(wyniki, aes(x = factor(Rok), y = RocznyZyskNetto, fill = factor(PojemnoscMagazynu))) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Roczny Zysk Netto w Zależności od Pojemności Magazynu",
+       x = "Rok", y = "Zysk Netto [PLN]",
+       fill = "Pojemność Magazynu")
+
+ggplot(wyniki, aes(x = factor(Rok), y = RocznyZyskNetto, fill = factor(PojemnoscMagazynu))) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_brewer(palette = "Set3") +  
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"), 
+    plot.subtitle = element_text(hjust = 0.5, size = 12), 
+    axis.title.x = element_text(size = 12, face = "bold"), 
+    axis.title.y = element_text(size = 12, face = "bold"), 
+    legend.title = element_text(face = "bold"), 
+    legend.position = "bottom" 
+  ) +
+  labs(
+    title = "Roczny Zysk Netto w Zależności od Pojemności Magazynu",
+    x = "Rok",
+    y = "Zysk Netto [PLN]",
+    fill = "Pojemność Magazynu"
+  ) +
+  geom_text(aes(label=sprintf("%.2f", RocznyZyskNetto)), vjust=-0.3, position = position_dodge(0.9), size=3)
+
+ggsave("4.2f.png", width = 11.5, height = 11, dpi = 300)
